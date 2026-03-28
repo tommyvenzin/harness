@@ -1,0 +1,1051 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Harness Validator</title>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
+<style>
+body{
+  font-family:Arial;
+  padding:20px;
+}
+
+.controls{
+  margin-bottom:16px;
+  display:flex;
+  gap:12px;
+  align-items:center;
+  flex-wrap:wrap;
+}
+
+label{
+  font-weight:bold;
+}
+
+select,input[type="text"],textarea{
+  padding:6px 10px;
+}
+
+textarea{
+  width:100%;
+  min-height:140px;
+  font-family:Consolas,monospace;
+}
+
+table{
+  border-collapse:collapse;
+  margin-top:20px;
+  width:100%;
+}
+
+td,th{
+  border:1px solid #ccc;
+  padding:6px 10px;
+  text-align:center;
+  vertical-align:middle;
+}
+
+.valid{
+  background:#2d7ef7;
+  color:white;
+}
+
+.invalid{
+  background:#ff4d4d;
+  color:white;
+}
+
+.leader{
+  outline:3px solid #f59e0b;
+  outline-offset:-3px;
+}
+
+.info{
+  margin:12px 0;
+  padding:10px 12px;
+  background:#f3f4f6;
+  border:1px solid #d1d5db;
+}
+
+.small{
+  font-size:12px;
+  color:#555;
+}
+
+.match-pass{
+  background:#dcfce7;
+  color:#166534;
+  font-weight:bold;
+}
+
+.match-warning{
+  background:#fef9c3;
+  color:#92400e;
+  font-weight:bold;
+}
+
+.match-fail{
+  background:#fee2e2;
+  color:#b91c1c;
+  font-weight:bold;
+}
+
+.match-empty{
+  background:#f3f4f6;
+  color:#666;
+}
+
+.summary-table{
+  width:auto;
+  margin-top:12px;
+  margin-bottom:12px;
+}
+
+.summary-table td,
+.summary-table th{
+  min-width:130px;
+}
+</style>
+</head>
+
+<body>
+
+<h2>Harness PDF Reader</h2>
+
+<div class="controls">
+  <input type="file" id="pdfUpload">
+  <label for="raceType">Race Type:</label>
+  <select id="raceType">
+    <option value="mobile" selected>Mobile</option>
+    <option value="stand">Stand</option>
+  </select>
+</div>
+
+<div class="controls">
+  <label for="websiteUrl">Harness URL:</label>
+  <input type="text" id="websiteUrl" size="70" placeholder="Paste Harness race-fields URL here">
+  <button id="loadWebsiteBtn">Load Website</button>
+</div>
+
+<div class="small">
+  If website loading is blocked, open the Harness page, press Ctrl+A then Ctrl+C, paste the page into the box below, then click “Parse Pasted Website Content”.
+</div>
+
+<div style="margin-top:8px;">
+  <textarea id="websiteSource" placeholder="Optional fallback: paste website HTML or copied page text here"></textarea>
+</div>
+
+<div class="controls">
+  <button id="parsePastedBtn">Parse Pasted Website Content</button>
+</div>
+
+<div id="statusBox" class="info">Upload PDF first. Website comparison is optional.</div>
+<div id="winnerSummary"></div>
+<div id="result"></div>
+
+<script>
+
+let latestHorses = [];
+let latestRaceMeta = {
+  raceNumber: "",
+  raceTitle: ""
+};
+
+let latestWinnerMeta = {
+  horse: "",
+  mileRate: "",
+  grossTime: ""
+};
+
+let websiteRows = [];
+let websiteMeta = {
+  raceType: "",
+  source: "",
+  mileRate: "",
+  grossTime: ""
+};
+
+document.getElementById("pdfUpload").addEventListener("change", async (e) => {
+
+  const file = e.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+
+  reader.onload = async function () {
+
+    const typedarray = new Uint8Array(this.result);
+    const pdf = await pdfjsLib.getDocument(typedarray).promise;
+
+    let tokens = [];
+
+    for (let p = 1; p <= pdf.numPages; p++) {
+
+      const page = await pdf.getPage(p);
+      const content = await page.getTextContent();
+
+      content.items.forEach(item => {
+        const t = item.str.trim();
+        if (t.length > 0){
+          tokens.push(t);
+        }
+      });
+
+    }
+
+    parse(tokens);
+
+  };
+
+  reader.readAsArrayBuffer(file);
+
+});
+
+document.getElementById("raceType").addEventListener("change", () => {
+  if(latestHorses.length){
+    display(latestHorses);
+  }
+});
+
+document.getElementById("loadWebsiteBtn").addEventListener("click", async () => {
+  const url = document.getElementById("websiteUrl").value.trim();
+  if(!url){
+    setStatus("Paste a Harness URL first.");
+    return;
+  }
+
+  if(!latestHorses.length){
+    setStatus("Upload the PDF first so the website parser knows which race and horses to look for.");
+    return;
+  }
+
+  setStatus("Loading website...");
+
+  try{
+    const html = await fetchWebsiteContent(url);
+    document.getElementById("websiteSource").value = html;
+    parseWebsiteSource(html, "url");
+  }catch(err){
+    setStatus("Website load failed. Paste the website HTML/text into the big box below and click 'Parse Pasted Website Content'.");
+  }
+});
+
+document.getElementById("parsePastedBtn").addEventListener("click", () => {
+  const source = document.getElementById("websiteSource").value.trim();
+  if(!source){
+    setStatus("Paste website HTML or copied page text first.");
+    return;
+  }
+  parseWebsiteSource(source, "paste");
+});
+
+function setStatus(text){
+  document.getElementById("statusBox").textContent = text;
+}
+
+function normalizeHorseName(name){
+  return String(name || "")
+    .toUpperCase()
+    .replace(/\((NZ|AUS|USA|GB|IRE|FR)\)/g, "")
+    .replace(/\b(NZ|AUS|USA|GB|IRE|FR)\b$/g, "")
+    .replace(/[^\w\s]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeDriverName(name){
+  return String(name || "")
+    .toUpperCase()
+    .replace(/\s+/g, " ")
+    .replace(/[^\w\s'.-]/g, "")
+    .trim();
+}
+
+function namesMatch(a,b){
+  return normalizeHorseName(a) === normalizeHorseName(b);
+}
+
+function driversMatch(a,b){
+  return normalizeDriverName(a) === normalizeDriverName(b);
+}
+
+function isExactHorseMatch(a,b){
+  const aa = String(a || "")
+    .toUpperCase()
+    .replace(/[^\w\s]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const bb = String(b || "")
+    .toUpperCase()
+    .replace(/[^\w\s]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return aa === bb;
+}
+
+function getHorseCellClass(pdfHorse, webHorse){
+  if(!webHorse) return "match-empty";
+  if(isExactHorseMatch(pdfHorse, webHorse)) return "match-pass";
+  if(namesMatch(pdfHorse, webHorse)) return "match-warning";
+  return "match-fail";
+}
+
+function getDriverCellClass(pdfDriver, webDriver){
+  if(!webDriver) return "match-empty";
+  return driversMatch(pdfDriver, webDriver) ? "match-pass" : "match-fail";
+}
+
+function normalizeRaceClock(str){
+  if(!str) return "";
+
+  let s = String(str).trim();
+
+  const m1 = s.match(/^(\d+):(\d{2})[:.](\d{1,2})$/);
+  if(m1){
+    const mins = m1[1];
+    const secs = m1[2];
+    const frac = m1[3];
+    return mins + ":" + secs + "." + frac;
+  }
+
+  const m2 = s.match(/^(\d+):(\d{2}\.\d{1,2})$/);
+  if(m2){
+    return s;
+  }
+
+  return s;
+}
+
+function raceClockToSeconds(str){
+  const normalized = normalizeRaceClock(str);
+  if(!normalized) return NaN;
+
+  const match = normalized.match(/^(\d+):(\d{2})(?:\.(\d{1,2}))?$/);
+  if(!match) return NaN;
+
+  const mins = parseInt(match[1], 10);
+  const secs = parseInt(match[2], 10);
+  const frac = match[3] ? parseInt(match[3], 10) / Math.pow(10, match[3].length) : 0;
+
+  return mins * 60 + secs + frac;
+}
+
+function raceClockMatch(a,b){
+  const aa = raceClockToSeconds(a);
+  const bb = raceClockToSeconds(b);
+
+  if(isNaN(aa) || isNaN(bb)) return false;
+
+  return Math.abs(aa - bb) < 0.051;
+}
+
+function getWinnerTimeCellClass(pdfValue, webValue){
+  if(!webValue) return "match-empty";
+  return raceClockMatch(pdfValue, webValue) ? "match-pass" : "match-fail";
+}
+
+function isHorseStart(tokens,i){
+
+  if(!tokens[i] || !tokens[i+1] || !tokens[i+2] || !tokens[i+3]) return false;
+
+  if(!/^\d+$/.test(tokens[i])) return false;
+  if(!/^\d+$/.test(tokens[i+1])) return false;
+
+  const horse = tokens[i+2];
+  const speed = tokens[i+3];
+
+  if(horse==="Horse/" || horse==="Driver") return false;
+  if(!/^\d+\.\d+$/.test(speed)) return false;
+
+  const rank=parseInt(tokens[i]);
+  const tab=parseInt(tokens[i+1]);
+
+  if(rank<1 || rank>30) return false;
+  if(tab<1 || tab>30) return false;
+
+  return true;
+}
+
+function parseTimeToSeconds(token){
+
+  if(!token) return "";
+
+  let cleaned = token.replace(/\[\d+\]/g,"").trim();
+  cleaned = cleaned.replace(/^\(/,"").replace(/\)$/,"");
+
+  const match = cleaned.match(/^(\d+):(\d{2}(?:\.\d+)?)$/);
+  if(!match) return "";
+
+  const minutes=parseInt(match[1]);
+  const seconds=parseFloat(match[2]);
+
+  return +(minutes*60+seconds).toFixed(2);
+}
+
+function parseRaceClockToken(token){
+  if(!token) return "";
+
+  const cleaned = token
+    .replace(/\[\d+\]/g, "")
+    .replace(/[(),]/g, "")
+    .trim();
+
+  if(!/^\d+:\d{2}\.\d+$/.test(cleaned)) return "";
+  return parseTimeToSeconds(cleaned);
+}
+
+function extractRaceTimes(block){
+  const inlineTimes = [];
+  const bracketTimes = [];
+
+  for(let i=0;i<block.length;i++){
+    const token = (block[i] || "").trim();
+    if(!token) continue;
+
+    const parenthetical = token.match(/^\((\d+:\d{2}\.\d+)\)$/);
+    if(parenthetical){
+      const sec = parseTimeToSeconds(parenthetical[1]);
+      if(sec !== "") bracketTimes.push(sec);
+      continue;
+    }
+
+    const sec = parseRaceClockToken(token);
+    if(sec !== ""){
+      inlineTimes.push(sec);
+    }
+  }
+
+  const leadCandidates = inlineTimes.filter(v => v >= 45 && v <= 80);
+  const quarterCandidates = inlineTimes.filter(v => v >= 20 && v <= 40);
+
+  const leadTime = leadCandidates.length ? leadCandidates[0] : "";
+
+  const q1 = quarterCandidates[0] ?? "";
+  const q2 = bracketTimes[0] ?? quarterCandidates[1] ?? "";
+  const q3 = bracketTimes[1] ?? quarterCandidates[2] ?? "";
+  const q4 = bracketTimes[2] ?? quarterCandidates[3] ?? "";
+
+  return { leadTime, q1, q2, q3, q4 };
+}
+
+function extractFirst50(block){
+  const decimalTokens = [];
+
+  for(let i=3;i<Math.min(block.length, 18);i++){
+    const t = (block[i] || "").trim();
+    if(/^\d{2}\.\d{2}$/.test(t)){
+      decimalTokens.push(parseFloat(t));
+    }
+  }
+
+  return decimalTokens[1] ?? "";
+}
+
+function parseMeters(token){
+
+  if(!token) return "";
+
+  const m=token.match(/^(\d+)m$/);
+  return m ? parseInt(m[1]) : "";
+}
+
+function findDriver(block, horse){
+
+  for(let i=3;i<block.length;i++){
+
+    const t=block[i].trim();
+
+    if(t===horse) continue;
+
+    if(t.includes("Tabcorp")) continue;
+    if(t.includes("Race")) continue;
+    if(t.includes("Professional")) continue;
+
+    if(/^[A-Z][a-z]+(?:\s[A-Za-z.'-]+)+$/.test(t)){
+      return t;
+    }
+  }
+
+  return "";
+}
+
+function findMeterRow(block){
+
+  let meters=[];
+
+  for(let i=0;i<block.length;i++){
+    const m=parseMeters(block[i]);
+    if(m!==""){
+      meters.push(m);
+    }
+  }
+
+  if(meters.length>=9){
+    return meters.slice(-9);
+  }
+
+  return [];
+}
+
+function extractWinnerTimes(block){
+  const qLabelIndex = block.findIndex(t => /^Q[1-4]$/.test(t));
+  const endIndex = qLabelIndex === -1 ? block.length : qLabelIndex;
+
+  const plainTimes = [];
+  for(let i=15; i<endIndex; i++){
+    const t = block[i];
+    if(/^\d+:\d+\.\d+$/.test(t)){
+      plainTimes.push(t);
+    }
+  }
+
+  return {
+    mileRate: plainTimes[2] || "",
+    grossTime: plainTimes[plainTimes.length - 1] || ""
+  };
+}
+
+function markLeaders(horses){
+  const validFirst50s = horses
+    .map(h => Number(h.first50))
+    .filter(v => !isNaN(v) && v > 0);
+
+  if(!validFirst50s.length){
+    horses.forEach(h => h.isLeader = false);
+    return;
+  }
+
+  const minFirst50 = Math.min(...validFirst50s);
+
+  horses.forEach(h => {
+    h.isLeader = Number(h.first50) === minFirst50;
+  });
+}
+
+function validateLeaderFirst50(first50, isLeader, raceType){
+  if(!isLeader) return "";
+
+  const value = Number(first50);
+  if(isNaN(value)) return false;
+
+  if(raceType === "stand"){
+    return value >= 5 && value <= 6;
+  }
+
+  return value >= 3.2 && value <= 4.5;
+}
+
+function parse(tokens){
+
+  const starts=[];
+
+  for(let i=0;i<tokens.length;i++){
+    if(isHorseStart(tokens,i)){
+      starts.push(i);
+    }
+  }
+
+  let fullText = tokens.join(" ");
+
+  const raceMatch = fullText.match(/Race\s+(\d+):\s+(.+?)\s+-\s+\d{3,4}m/i);
+  latestRaceMeta = {
+    raceNumber: raceMatch ? raceMatch[1] : "",
+    raceTitle: raceMatch ? raceMatch[2].trim() : ""
+  };
+
+  latestWinnerMeta = {
+    horse: "",
+    mileRate: "",
+    grossTime: ""
+  };
+
+  const horses=[];
+
+  for(let s=0;s<starts.length;s++){
+
+    const start=starts[s];
+    const end=(s<starts.length-1)?starts[s+1]:tokens.length;
+
+    let block=tokens.slice(start,end);
+
+    const stopWords=["Scratched:","Tabcorp","Race","Data","Note:","[","-:--.--","N/A"];
+
+    let clean=[];
+
+    for(let i=0;i<block.length;i++){
+      if(stopWords.includes(block[i])) break;
+      clean.push(block[i]);
+    }
+
+    block=clean;
+
+    const rank=parseInt(block[0]);
+    const tab=parseInt(block[1]);
+    const horse=block[2]||"";
+    const topSpeed=parseFloat(block[3])||"";
+    const first50=extractFirst50(block);
+
+    const raceTimes = extractRaceTimes(block);
+    const q1=raceTimes.q1;
+    const q2=raceTimes.q2;
+    const q3=raceTimes.q3;
+    const q4=raceTimes.q4;
+
+    const driver=findDriver(block,horse);
+
+    const meters=findMeterRow(block);
+
+    const first200=meters[0]??"";
+    const firstHalf=meters[1]??"";
+    const middleHalf=meters[2]??"";
+    const lastHalf=meters[3]??"";
+    const lastMile=meters[8]??"";
+
+    if(rank === 1){
+      const winnerTimes = extractWinnerTimes(block);
+      latestWinnerMeta = {
+        horse,
+        mileRate: winnerTimes.mileRate,
+        grossTime: winnerTimes.grossTime
+      };
+    }
+
+    horses.push({
+      rank,
+      tab,
+      horse,
+      driver,
+      topSpeed,
+      first50,
+      first200,
+      firstHalf,
+      middleHalf,
+      lastHalf,
+      lastMile,
+      q1,
+      q2,
+      q3,
+      q4,
+      isLeader:false
+    });
+  }
+
+  markLeaders(horses);
+
+  websiteRows = [];
+  websiteMeta = {
+    raceType: "",
+    source: "",
+    mileRate: "",
+    grossTime: ""
+  };
+
+  latestHorses = horses;
+  display(horses);
+
+  let msg = "PDF loaded";
+  if(latestRaceMeta.raceNumber){
+    msg += " | Race " + latestRaceMeta.raceNumber;
+  }
+  if(latestRaceMeta.raceTitle){
+    msg += " | " + latestRaceMeta.raceTitle;
+  }
+  msg += " | Website data reset for this PDF";
+  setStatus(msg);
+}
+
+async function fetchWebsiteContent(url){
+  const attempts = [];
+
+  attempts.push(url);
+
+  const mcMatch = url.match(/[?&]mc=([^&]+)/i);
+  if(mcMatch){
+    attempts.push("https://legacy.harness.org.au/fields.cfm?mc=" + mcMatch[1]);
+  }
+
+  const uniqueAttempts = [...new Set(attempts)];
+
+  for(const attemptUrl of uniqueAttempts){
+    try{
+      const res = await fetch(attemptUrl);
+      const txt = await res.text();
+      if(txt && txt.length > 500){
+        return txt;
+      }
+    }catch(err){}
+
+    try{
+      const proxyUrl = "https://api.allorigins.win/raw?url=" + encodeURIComponent(attemptUrl);
+      const res = await fetch(proxyUrl);
+      const txt = await res.text();
+      if(txt && txt.length > 500){
+        return txt;
+      }
+    }catch(err){}
+  }
+
+  throw new Error("Website fetch failed");
+}
+
+function getRelevantRaceBlock(root){
+  const blocks = Array.from(root.querySelectorAll("div.forPrint"));
+
+  if(!blocks.length){
+    return root;
+  }
+
+  if(!latestRaceMeta.raceNumber){
+    return blocks[0];
+  }
+
+  for(const block of blocks){
+    const raceNumberCell = block.querySelector("table.raceMoreInfo td.raceNumber");
+    if(raceNumberCell){
+      const blockRaceNumber = raceNumberCell.textContent.trim();
+      if(blockRaceNumber === String(latestRaceMeta.raceNumber).trim()){
+        return block;
+      }
+    }
+
+    const blockText = block.innerText || "";
+    if(new RegExp("\\bRace\\s*" + latestRaceMeta.raceNumber + "\\b","i").test(blockText)){
+      return block;
+    }
+  }
+
+  return blocks[0];
+}
+
+function parseWebsiteHtml(html){
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, "text/html");
+
+  let rows = [];
+
+  const raceBlock = getRelevantRaceBlock(doc);
+  const raceInfoText = raceBlock ? raceBlock.innerText : (doc.body ? doc.body.innerText : html);
+
+  if(/\bstand(?:ing)?\b/i.test(raceInfoText)){
+    websiteMeta.raceType = "stand";
+    document.getElementById("raceType").value = "stand";
+  }else if(/\bmobile\b/i.test(raceInfoText)){
+    websiteMeta.raceType = "mobile";
+    document.getElementById("raceType").value = "mobile";
+  }
+
+  const grossMatch = raceInfoText.match(/Gross Time:\s*([0-9:.]+)/i);
+  const mileMatch = raceInfoText.match(/Mile Rate:\s*([0-9:.]+)/i);
+
+  websiteMeta.grossTime = grossMatch ? normalizeRaceClock(grossMatch[1]) : "";
+  websiteMeta.mileRate = mileMatch ? normalizeRaceClock(mileMatch[1]) : "";
+
+  const raceTables = Array.from(raceBlock.querySelectorAll("table.raceFieldTable.resultTable"));
+
+  raceTables.forEach(table => {
+    const trList = Array.from(table.querySelectorAll("tr"));
+
+    trList.forEach(tr => {
+      const horseCell = tr.querySelector("td.horse_name");
+      const driverCell = tr.querySelector("td.driver");
+
+      if(!horseCell || !driverCell) return;
+
+      const horseLink = horseCell.querySelector("a");
+      const horse = horseLink ? horseLink.textContent.trim() : horseCell.textContent.trim();
+
+      const driverLink = driverCell.querySelector("a");
+      const driver = driverLink ? driverLink.textContent.trim() : driverCell.textContent.trim();
+
+      const allTds = tr.querySelectorAll("td");
+      let tab = "";
+
+      if(allTds.length >= 6){
+        tab = allTds[5].textContent.trim();
+      }
+
+      if(horse){
+        rows.push({
+          tab,
+          horse,
+          driver
+        });
+      }
+    });
+  });
+
+  return rows;
+}
+
+function getTextFromSource(source){
+  const text = String(source || "");
+
+  if(/<html|<table|<tr|<td|<body|class=/i.test(text)){
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(text, "text/html");
+    return doc.body ? doc.body.innerText.replace(/\r/g, "") : text.replace(/\r/g, "");
+  }
+
+  return text.replace(/\r/g, "");
+}
+
+function sliceToRelevantRace(lines){
+  if(!latestRaceMeta.raceNumber){
+    return lines;
+  }
+
+  const raceStartRegex = new RegExp("\\bRace\\s*" + latestRaceMeta.raceNumber + "\\b", "i");
+  const startIndex = lines.findIndex(line => raceStartRegex.test(line));
+
+  if(startIndex === -1){
+    return lines;
+  }
+
+  let endIndex = lines.length;
+
+  for(let i=startIndex+1;i<lines.length;i++){
+    if(/\bRace\s+\d+\b/i.test(lines[i])){
+      endIndex = i;
+      break;
+    }
+  }
+
+  return lines.slice(startIndex, endIndex);
+}
+
+function dedupeWebsiteRows(rows){
+  const deduped = [];
+  const seen = new Set();
+
+  rows.forEach(r => {
+    const key = normalizeHorseName(r.horse);
+    if(!key) return;
+    if(seen.has(key)) return;
+    seen.add(key);
+    deduped.push(r);
+  });
+
+  return deduped;
+}
+
+function parseWebsiteSource(source, sourceType){
+
+  const raw = String(source || "");
+  websiteMeta.source = sourceType;
+  websiteMeta.grossTime = "";
+  websiteMeta.mileRate = "";
+
+  let rows = [];
+
+  if(/<table|class=|raceFieldTable|driver-short|horse_name_link|forPrint/i.test(raw)){
+    rows = parseWebsiteHtml(raw);
+  }
+
+  if(!rows.length){
+    const normalizedText = getTextFromSource(raw);
+
+    if(/\bstand(?:ing)?\b/i.test(normalizedText)){
+      websiteMeta.raceType = "stand";
+      document.getElementById("raceType").value = "stand";
+    }else if(/\bmobile\b/i.test(normalizedText)){
+      websiteMeta.raceType = "mobile";
+      document.getElementById("raceType").value = "mobile";
+    }
+
+    const workingTextLines = sliceToRelevantRace(
+      normalizedText
+        .split("\n")
+        .map(s => s.replace(/\s+/g," ").trim())
+        .filter(Boolean)
+    );
+
+    const workingText = workingTextLines.join("\n");
+
+    const grossMatch = workingText.match(/Gross Time:\s*([0-9:.]+)/i);
+    const mileMatch = workingText.match(/Mile Rate:\s*([0-9:.]+)/i);
+
+    websiteMeta.grossTime = grossMatch ? normalizeRaceClock(grossMatch[1]) : "";
+    websiteMeta.mileRate = mileMatch ? normalizeRaceClock(mileMatch[1]) : "";
+
+    const fallbackRows = [];
+
+    latestHorses.forEach(pdfHorse => {
+      const targetHorse = normalizeHorseName(pdfHorse.horse);
+
+      for(let i=0;i<workingTextLines.length;i++){
+
+        const lineNorm = normalizeHorseName(workingTextLines[i]);
+        if(!lineNorm.includes(targetHorse)) continue;
+
+        const rawLine = workingTextLines[i];
+        const tabMatch = rawLine.match(/^(\d{1,2})\b/);
+
+        let driver = "";
+
+        if(!driver && workingTextLines[i+1] && /^[A-Z][a-z]+(?:\s+[A-Za-z.'-]+)+$/.test(workingTextLines[i+1])){
+          driver = workingTextLines[i+1].trim();
+        }
+
+        fallbackRows.push({
+          tab: tabMatch ? tabMatch[1].trim() : "",
+          horse: pdfHorse.horse,
+          driver
+        });
+
+        break;
+      }
+    });
+
+    rows = fallbackRows;
+  }
+
+  websiteRows = dedupeWebsiteRows(rows);
+
+  if(latestHorses.length){
+    display(latestHorses);
+  }
+
+  setStatus(
+    "Website parsed: " + websiteRows.length + " runner(s) found" +
+    (websiteMeta.raceType ? " | Race type auto-set to " + websiteMeta.raceType : "") +
+    (websiteMeta.grossTime ? " | Gross Time " + websiteMeta.grossTime : "") +
+    (websiteMeta.mileRate ? " | Mile Rate " + websiteMeta.mileRate : "")
+  );
+}
+
+function findWebsiteHorse(pdfHorse){
+  const target = normalizeHorseName(pdfHorse);
+  return websiteRows.find(w => normalizeHorseName(w.horse) === target) || null;
+}
+
+function renderWinnerSummary(){
+  const winnerDiv = document.getElementById("winnerSummary");
+
+  const pdfGross = latestWinnerMeta.grossTime || "";
+  const pdfMile = latestWinnerMeta.mileRate || "";
+  const webGross = websiteMeta.grossTime || "";
+  const webMile = websiteMeta.mileRate || "";
+
+  const grossClass = getWinnerTimeCellClass(pdfGross, webGross);
+  const mileClass = getWinnerTimeCellClass(pdfMile, webMile);
+
+  if(!latestWinnerMeta.horse){
+    winnerDiv.innerHTML = "";
+    return;
+  }
+
+  let html = "";
+  html += "<table class='summary-table'>";
+  html += "<tr>";
+  html += "<th>Winner</th>";
+  html += "<th>PDF Mile Rate</th>";
+  html += "<th>Web Mile Rate</th>";
+  html += "<th>PDF Gross Time</th>";
+  html += "<th>Web Gross Time</th>";
+  html += "</tr>";
+  html += "<tr>";
+  html += `<td>${latestWinnerMeta.horse}</td>`;
+  html += `<td class="${pdfMile ? 'valid' : 'match-empty'}">${pdfMile || "-"}</td>`;
+  html += `<td class="${mileClass}">${webMile || "-"}</td>`;
+  html += `<td class="${pdfGross ? 'valid' : 'match-empty'}">${pdfGross || "-"}</td>`;
+  html += `<td class="${grossClass}">${webGross || "-"}</td>`;
+  html += "</tr>";
+  html += "</table>";
+
+  winnerDiv.innerHTML = html;
+}
+
+function display(horses){
+
+  const raceType = document.getElementById("raceType").value;
+
+  renderWinnerSummary();
+
+  let html="<table>";
+
+  html+="<tr>";
+  html+="<th>Rank</th>";
+  html+="<th>Horse</th>";
+  html+="<th>Driver</th>";
+  html+="<th>Web Horse</th>";
+  html+="<th>Web Driver</th>";
+  html+="<th>Speed</th>";
+  html+="<th>1st 50m</th>";
+  html+="<th>Leader 50m Rule</th>";
+  html+="<th>Mile</th>";
+  html+="<th>200m</th>";
+  html+="<th>1st Half</th>";
+  html+="<th>Mid Half</th>";
+  html+="<th>Last Half</th>";
+  html+="<th>Q1</th>";
+  html+="<th>Q2</th>";
+  html+="<th>Q3</th>";
+  html+="<th>Q4</th>";
+  html+="</tr>";
+
+  horses.forEach(h=>{
+
+    const webHorse = findWebsiteHorse(h.horse);
+
+    const webHorseName = webHorse ? webHorse.horse : "";
+    const webDriverName = webHorse ? webHorse.driver : "";
+
+    const webHorseClass = getHorseCellClass(h.horse, webHorseName);
+    const webDriverClass = getDriverCellClass(h.driver, webDriverName);
+
+    const speedClass=h.topSpeed<61.5?"valid":"invalid";
+    const mileClass=h.lastMile>1609?"valid":"invalid";
+    const d200Class=(h.first200>=195&&h.first200<=205)?"valid":"invalid";
+
+    const fhClass=h.firstHalf>804?"valid":"invalid";
+    const mhClass=h.middleHalf>804?"valid":"invalid";
+    const lhClass=h.lastHalf>804?"valid":"invalid";
+
+    const q1Class=h.q1>25.5?"valid":"invalid";
+    const q2Class=h.q2>25.5?"valid":"invalid";
+    const q3Class=h.q3>25.5?"valid":"invalid";
+    const q4Class=h.q4>25.5?"valid":"invalid";
+
+    const first50Valid = validateLeaderFirst50(h.first50, h.isLeader, raceType);
+    const first50RuleClass = h.isLeader
+      ? (first50Valid ? "valid" : "invalid")
+      : "";
+
+    const first50CellClass = h.isLeader ? "leader" : "";
+
+    html+="<tr>";
+    html+=`<td>${h.rank}</td>`;
+    html+=`<td>${h.horse}</td>`;
+    html+=`<td>${h.driver}</td>`;
+    html+=`<td class="${webHorseClass}">${webHorseName || "-"}</td>`;
+    html+=`<td class="${webDriverClass}">${webDriverName || "-"}</td>`;
+    html+=`<td class="${speedClass}">${h.topSpeed}</td>`;
+    html+=`<td class="${first50CellClass}">${h.first50}</td>`;
+    html+=`<td class="${first50RuleClass}">${h.isLeader ? (first50Valid ? "PASS" : "FAIL") : "-"}</td>`;
+    html+=`<td class="${mileClass}">${h.lastMile}</td>`;
+    html+=`<td class="${d200Class}">${h.first200}</td>`;
+    html+=`<td class="${fhClass}">${h.firstHalf}</td>`;
+    html+=`<td class="${mhClass}">${h.middleHalf}</td>`;
+    html+=`<td class="${lhClass}">${h.lastHalf}</td>`;
+    html+=`<td class="${q1Class}">${h.q1}</td>`;
+    html+=`<td class="${q2Class}">${h.q2}</td>`;
+    html+=`<td class="${q3Class}">${h.q3}</td>`;
+    html+=`<td class="${q4Class}">${h.q4}</td>`;
+    html+="</tr>";
+
+  });
+
+  html+="</table>";
+
+  document.getElementById("result").innerHTML=html;
+}
+
+</script>
+
+</body>
+</html>
