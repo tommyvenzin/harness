@@ -439,7 +439,10 @@ function extractRaceTimes(block){
     if(leadClock){
       const leadSec = parseTimeToSeconds(leadClock);
       if(leadSec !== "" && leadSec >= 40 && leadSec <= 80){
-        leadTimeCandidates.push(leadClock);
+        leadTimeCandidates.push({
+          clock: leadClock,
+          seconds: leadSec
+        });
       }
     }
 
@@ -452,14 +455,22 @@ function extractRaceTimes(block){
   const leadCandidates = inlineTimes.filter(v => v >= 45 && v <= 80);
   const quarterCandidates = inlineTimes.filter(v => v >= 20 && v <= 40);
 
-  const leadTime = leadCandidates.length ? leadCandidates[0] : "";
+  const bestLeadCandidate = leadTimeCandidates.length
+    ? leadTimeCandidates.reduce((best, current) => current.seconds < best.seconds ? current : best)
+    : null;
 
-  const q1 = quarterCandidates[0] ?? "";
-  const q2 = bracketTimes[0] ?? quarterCandidates[1] ?? "";
-  const q3 = bracketTimes[1] ?? quarterCandidates[2] ?? "";
-  const q4 = bracketTimes[2] ?? quarterCandidates[3] ?? "";
+  const leadTime = bestLeadCandidate
+    ? bestLeadCandidate.seconds
+    : (leadCandidates.length ? Math.min(...leadCandidates) : "");
 
-  const leadClock = leadTimeCandidates[0] || (leadTime !== "" ? formatSecondsToClock(leadTime) : "");
+  const q1 = bracketTimes[0] ?? quarterCandidates[0] ?? "";
+  const q2 = bracketTimes[1] ?? quarterCandidates[1] ?? "";
+  const q3 = bracketTimes[2] ?? quarterCandidates[2] ?? "";
+  const q4 = bracketTimes[3] ?? quarterCandidates[3] ?? "";
+
+  const leadClock = bestLeadCandidate
+    ? bestLeadCandidate.clock
+    : (leadTime !== "" ? formatSecondsToClock(leadTime) : "");
 
   return { leadTime, leadClock, q1, q2, q3, q4 };
 }
