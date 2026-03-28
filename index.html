@@ -398,9 +398,31 @@ function parseRaceClockToken(token){
   return parseTimeToSeconds(cleaned);
 }
 
+function parseRaceClockString(token){
+  if(!token) return "";
+
+  const cleaned = String(token)
+    .replace(/\[\d+\]/g, "")
+    .replace(/[(),]/g, "")
+    .trim();
+
+  if(!/^\d+:\d{2}\.\d+$/.test(cleaned)) return "";
+  return cleaned;
+}
+
+function formatSecondsToClock(seconds){
+  const value = Number(seconds);
+  if(isNaN(value)) return "";
+
+  const mins = Math.floor(value / 60);
+  const secs = (value - mins * 60).toFixed(2).padStart(5, "0");
+  return mins + ":" + secs;
+}
+
 function extractRaceTimes(block){
   const inlineTimes = [];
   const bracketTimes = [];
+  const leadTimeCandidates = [];
 
   for(let i=0;i<block.length;i++){
     const token = (block[i] || "").trim();
@@ -413,6 +435,17 @@ function extractRaceTimes(block){
       continue;
     }
 
+    const leadClock = parseRaceClockString(token);
+    if(leadClock){
+      const leadSec = parseTimeToSeconds(leadClock);
+      if(leadSec !== "" && leadSec >= 40 && leadSec <= 80){
+        leadTimeCandidates.push({
+          clock: leadClock,
+          seconds: leadSec
+        });
+      }
+    }
+
     const sec = parseRaceClockToken(token);
     if(sec !== ""){
       inlineTimes.push(sec);
@@ -422,14 +455,24 @@ function extractRaceTimes(block){
   const leadCandidates = inlineTimes.filter(v => v >= 45 && v <= 80);
   const quarterCandidates = inlineTimes.filter(v => v >= 20 && v <= 40);
 
-  const leadTime = leadCandidates.length ? leadCandidates[0] : "";
+  const bestLeadCandidate = leadTimeCandidates.length
+    ? leadTimeCandidates.reduce((best, current) => current.seconds < best.seconds ? current : best)
+    : null;
 
-  const q1 = quarterCandidates[0] ?? "";
-  const q2 = bracketTimes[0] ?? quarterCandidates[1] ?? "";
-  const q3 = bracketTimes[1] ?? quarterCandidates[2] ?? "";
-  const q4 = bracketTimes[2] ?? quarterCandidates[3] ?? "";
+  const leadTime = bestLeadCandidate
+    ? bestLeadCandidate.seconds
+    : (leadCandidates.length ? Math.min(...leadCandidates) : "");
 
-  return { leadTime, q1, q2, q3, q4 };
+  const q1 = bracketTimes[0] ?? quarterCandidates[0] ?? "";
+  const q2 = bracketTimes[1] ?? quarterCandidates[1] ?? "";
+  const q3 = bracketTimes[2] ?? quarterCandidates[2] ?? "";
+  const q4 = bracketTimes[3] ?? quarterCandidates[3] ?? "";
+
+  const leadClock = bestLeadCandidate
+    ? bestLeadCandidate.clock
+    : (leadTime !== "" ? formatSecondsToClock(leadTime) : "");
+
+  return { leadTime, leadClock, q1, q2, q3, q4 };
 }
 
 function extractFirst50(block){
@@ -590,6 +633,8 @@ function parse(tokens){
     const first50=extractFirst50(block);
 
     const raceTimes = extractRaceTimes(block);
+    const leadTime = raceTimes.leadTime;
+    const leadClock = raceTimes.leadClock;
     const q1=raceTimes.q1;
     const q2=raceTimes.q2;
     const q3=raceTimes.q3;
@@ -630,6 +675,8 @@ function parse(tokens){
       q2,
       q3,
       q4,
+      leadTime,
+      leadClock,
       isLeader:false
     });
   }
@@ -982,6 +1029,7 @@ function display(horses){
   html+="<th>1st Half</th>";
   html+="<th>Mid Half</th>";
   html+="<th>Last Half</th>";
+  html+="<th>Lead Time</th>";
   html+="<th>Q1</th>";
   html+="<th>Q2</th>";
   html+="<th>Q3</th>";
@@ -1010,6 +1058,9 @@ function display(horses){
     const q2Class=h.q2>25.5?"valid":"invalid";
     const q3Class=h.q3>25.5?"valid":"invalid";
     const q4Class=h.q4>25.5?"valid":"invalid";
+    const leadClass = h.leadTime===""
+      ? "match-empty"
+      : (h.leadTime<=70 ? "valid" : "invalid");
 
     const first50Valid = validateLeaderFirst50(h.first50, h.isLeader, raceType);
     const first50RuleClass = h.isLeader
@@ -1032,6 +1083,7 @@ function display(horses){
     html+=`<td class="${fhClass}">${h.firstHalf}</td>`;
     html+=`<td class="${mhClass}">${h.middleHalf}</td>`;
     html+=`<td class="${lhClass}">${h.lastHalf}</td>`;
+    html+=`<td class="${leadClass}">${h.leadClock || "-"}</td>`;
     html+=`<td class="${q1Class}">${h.q1}</td>`;
     html+=`<td class="${q2Class}">${h.q2}</td>`;
     html+=`<td class="${q3Class}">${h.q3}</td>`;
