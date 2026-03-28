@@ -146,7 +146,6 @@ td,th{
 <div id="result"></div>
 
 <script>
-
 let latestHorses = [];
 let latestRaceMeta = {
   raceNumber: "",
@@ -159,93 +158,91 @@ let latestWinnerMeta = {
   grossTime: ""
 };
 
+let pdfOfficialMeta = {
+  leadTime: "",
+  q1: "",
+  q2: "",
+  q3: "",
+  q4: ""
+};
+
 let websiteRows = [];
 let websiteMeta = {
   raceType: "",
   source: "",
+  leadTime: "",
   mileRate: "",
   grossTime: ""
 };
 
 document.getElementById("pdfUpload").addEventListener("change", async (e) => {
-
   const file = e.target.files[0];
   if (!file) return;
 
   const reader = new FileReader();
 
   reader.onload = async function () {
-
     const typedarray = new Uint8Array(this.result);
     const pdf = await pdfjsLib.getDocument(typedarray).promise;
-
     let tokens = [];
 
     for (let p = 1; p <= pdf.numPages; p++) {
-
       const page = await pdf.getPage(p);
       const content = await page.getTextContent();
 
       content.items.forEach(item => {
         const t = item.str.trim();
-        if (t.length > 0){
-          tokens.push(t);
-        }
+        if (t) tokens.push(t);
       });
-
     }
 
     parse(tokens);
-
   };
 
   reader.readAsArrayBuffer(file);
-
 });
 
 document.getElementById("raceType").addEventListener("change", () => {
-  if(latestHorses.length){
-    display(latestHorses);
-  }
+  if (latestHorses.length) display(latestHorses);
 });
 
 document.getElementById("loadWebsiteBtn").addEventListener("click", async () => {
   const url = document.getElementById("websiteUrl").value.trim();
-  if(!url){
+  if (!url) {
     setStatus("Paste a Harness URL first.");
     return;
   }
 
-  if(!latestHorses.length){
-    setStatus("Upload the PDF first so the website parser knows which race and horses to look for.");
+  if (!latestHorses.length) {
+    setStatus("Upload the PDF first so the website parser knows which race to look for.");
     return;
   }
 
   setStatus("Loading website...");
 
-  try{
+  try {
     const html = await fetchWebsiteContent(url);
     document.getElementById("websiteSource").value = html;
     parseWebsiteSource(html, "url");
-  }catch(err){
+  } catch (err) {
     setStatus("Website load failed. Paste the website HTML/text into the big box below and click 'Parse Pasted Website Content'.");
   }
 });
 
 document.getElementById("parsePastedBtn").addEventListener("click", () => {
   const source = document.getElementById("websiteSource").value.trim();
-  if(!source){
+  if (!source) {
     setStatus("Paste website HTML or copied page text first.");
     return;
   }
   parseWebsiteSource(source, "paste");
 });
 
-function setStatus(text){
+function setStatus(text) {
   document.getElementById("statusBox").textContent = text;
 }
 
-function normalizeHorseName(name){
+function normalizeHorseName(name) {
   return String(name || "")
     .toUpperCase()
     .replace(/\((NZ|AUS|USA|GB|IRE|FR)\)/g, "")
@@ -255,7 +252,7 @@ function normalizeHorseName(name){
     .trim();
 }
 
-function normalizeDriverName(name){
+function normalizeDriverName(name) {
   return String(name || "")
     .toUpperCase()
     .replace(/\s+/g, " ")
@@ -263,15 +260,15 @@ function normalizeDriverName(name){
     .trim();
 }
 
-function namesMatch(a,b){
+function namesMatch(a, b) {
   return normalizeHorseName(a) === normalizeHorseName(b);
 }
 
-function driversMatch(a,b){
+function driversMatch(a, b) {
   return normalizeDriverName(a) === normalizeDriverName(b);
 }
 
-function isExactHorseMatch(a,b){
+function isExactHorseMatch(a, b) {
   const aa = String(a || "")
     .toUpperCase()
     .replace(/[^\w\s]/g, "")
@@ -287,45 +284,37 @@ function isExactHorseMatch(a,b){
   return aa === bb;
 }
 
-function getHorseCellClass(pdfHorse, webHorse){
-  if(!webHorse) return "match-empty";
-  if(isExactHorseMatch(pdfHorse, webHorse)) return "match-pass";
-  if(namesMatch(pdfHorse, webHorse)) return "match-warning";
+function getHorseCellClass(pdfHorse, webHorse) {
+  if (!webHorse) return "match-empty";
+  if (isExactHorseMatch(pdfHorse, webHorse)) return "match-pass";
+  if (namesMatch(pdfHorse, webHorse)) return "match-warning";
   return "match-fail";
 }
 
-function getDriverCellClass(pdfDriver, webDriver){
-  if(!webDriver) return "match-empty";
+function getDriverCellClass(pdfDriver, webDriver) {
+  if (!webDriver) return "match-empty";
   return driversMatch(pdfDriver, webDriver) ? "match-pass" : "match-fail";
 }
 
-function normalizeRaceClock(str){
-  if(!str) return "";
-
+function normalizeRaceClock(str) {
+  if (!str) return "";
   let s = String(str).trim();
 
   const m1 = s.match(/^(\d+):(\d{2})[:.](\d{1,2})$/);
-  if(m1){
-    const mins = m1[1];
-    const secs = m1[2];
-    const frac = m1[3];
-    return mins + ":" + secs + "." + frac;
-  }
+  if (m1) return `${m1[1]}:${m1[2]}.${m1[3]}`;
 
   const m2 = s.match(/^(\d+):(\d{2}\.\d{1,2})$/);
-  if(m2){
-    return s;
-  }
+  if (m2) return s;
 
   return s;
 }
 
-function raceClockToSeconds(str){
+function raceClockToSeconds(str) {
   const normalized = normalizeRaceClock(str);
-  if(!normalized) return NaN;
+  if (!normalized) return NaN;
 
   const match = normalized.match(/^(\d+):(\d{2})(?:\.(\d{1,2}))?$/);
-  if(!match) return NaN;
+  if (!match) return NaN;
 
   const mins = parseInt(match[1], 10);
   const secs = parseInt(match[2], 10);
@@ -334,142 +323,58 @@ function raceClockToSeconds(str){
   return mins * 60 + secs + frac;
 }
 
-function raceClockMatch(a,b){
-  const aa = raceClockToSeconds(a);
-  const bb = raceClockToSeconds(b);
+function isHorseStart(tokens, i) {
+  if (!tokens[i] || !tokens[i + 1] || !tokens[i + 2] || !tokens[i + 3]) return false;
+  if (!/^\d+$/.test(tokens[i])) return false;
+  if (!/^\d+$/.test(tokens[i + 1])) return false;
 
-  if(isNaN(aa) || isNaN(bb)) return false;
+  const horse = tokens[i + 2];
+  const speed = tokens[i + 3];
 
-  return Math.abs(aa - bb) < 0.051;
+  if (horse === "Horse/" || horse === "Driver") return false;
+  if (!/^\d+\.\d+$/.test(speed)) return false;
+
+  const rank = parseInt(tokens[i], 10);
+  const tab = parseInt(tokens[i + 1], 10);
+
+  return rank >= 1 && rank <= 30 && tab >= 1 && tab <= 30;
 }
 
-function getWinnerTimeCellClass(pdfValue, webValue){
-  if(!webValue) return "match-empty";
-  return raceClockMatch(pdfValue, webValue) ? "match-pass" : "match-fail";
-}
+function parseTimeToSeconds(token) {
+  if (!token) return "";
 
-function isHorseStart(tokens,i){
-
-  if(!tokens[i] || !tokens[i+1] || !tokens[i+2] || !tokens[i+3]) return false;
-
-  if(!/^\d+$/.test(tokens[i])) return false;
-  if(!/^\d+$/.test(tokens[i+1])) return false;
-
-  const horse = tokens[i+2];
-  const speed = tokens[i+3];
-
-  if(horse==="Horse/" || horse==="Driver") return false;
-  if(!/^\d+\.\d+$/.test(speed)) return false;
-
-  const rank=parseInt(tokens[i]);
-  const tab=parseInt(tokens[i+1]);
-
-  if(rank<1 || rank>30) return false;
-  if(tab<1 || tab>30) return false;
-
-  return true;
-}
-
-function parseTimeToSeconds(token){
-
-  if(!token) return "";
-
-  let cleaned = token.replace(/\[\d+\]/g,"").trim();
-  cleaned = cleaned.replace(/^\(/,"").replace(/\)$/,"");
+  let cleaned = String(token).replace(/\[\d+\]/g, "").trim();
+  cleaned = cleaned.replace(/^\(/, "").replace(/\)$/, "");
 
   const match = cleaned.match(/^(\d+):(\d{2}(?:\.\d+)?)$/);
-  if(!match) return "";
+  if (!match) return "";
 
-  const minutes=parseInt(match[1]);
-  const seconds=parseFloat(match[2]);
-
-  return +(minutes*60+seconds).toFixed(2);
+  return +(parseInt(match[1], 10) * 60 + parseFloat(match[2])).toFixed(2);
 }
 
-function parseRaceClockToken(token){
-  if(!token) return "";
-
-  const cleaned = token
-    .replace(/\[\d+\]/g, "")
-    .replace(/[(),]/g, "")
-    .trim();
-
-  if(!/^\d+:\d{2}\.\d+$/.test(cleaned)) return "";
-  return parseTimeToSeconds(cleaned);
+function isBracketQuarter(token) {
+  return /^\(\d+:\d{2}\.\d+\)$/.test(String(token || "").trim());
 }
 
-function parseRaceClockString(token){
-  if(!token) return "";
-
-  const cleaned = String(token)
-    .replace(/\[\d+\]/g, "")
-    .replace(/[(),]/g, "")
-    .trim();
-
-  if(!/^\d+:\d{2}\.\d+$/.test(cleaned)) return "";
-  return cleaned;
+function isRankedClock(token) {
+  return /^\d+:\d{2}\.\d+\s*\[\d+\]$/.test(String(token || "").trim());
 }
 
-function formatSecondsToClock(seconds){
-  const value = Number(seconds);
-  if(isNaN(value)) return "";
-
-  const mins = Math.floor(value / 60);
-  const secs = (value - mins * 60).toFixed(2).padStart(5, "0");
-  return mins + ":" + secs;
+function isPlainClock(token) {
+  return /^\d+:\d{2}\.\d+$/.test(String(token || "").trim());
 }
 
-function extractRaceTimes(block){
-  const inlineTimes = [];
-  const bracketTimes = [];
-  const leadTimeCandidates = [];
-
-  for(let i=0;i<block.length;i++){
-    const token = (block[i] || "").trim();
-    if(!token) continue;
-
-    const parenthetical = token.match(/^\((\d+:\d{2}\.\d+)\)$/);
-    if(parenthetical){
-      const sec = parseTimeToSeconds(parenthetical[1]);
-      if(sec !== "") bracketTimes.push(sec);
-      continue;
-    }
-
-    const leadClock = parseRaceClockString(token);
-    if(leadClock){
-      const leadSec = parseTimeToSeconds(leadClock);
-      if(leadSec !== "" && leadSec >= 40 && leadSec <= 80){
-        leadTimeCandidates.push(leadClock);
-      }
-    }
-
-    const sec = parseRaceClockToken(token);
-    if(sec !== ""){
-      inlineTimes.push(sec);
-    }
-  }
-
-  const leadCandidates = inlineTimes.filter(v => v >= 45 && v <= 80);
-  const quarterCandidates = inlineTimes.filter(v => v >= 20 && v <= 40);
-
-  const leadTime = leadCandidates.length ? leadCandidates[0] : "";
-
-  const q1 = quarterCandidates[0] ?? "";
-  const q2 = bracketTimes[0] ?? quarterCandidates[1] ?? "";
-  const q3 = bracketTimes[1] ?? quarterCandidates[2] ?? "";
-  const q4 = bracketTimes[2] ?? quarterCandidates[3] ?? "";
-
-  const leadClock = leadTimeCandidates[0] || (leadTime !== "" ? formatSecondsToClock(leadTime) : "");
-
-  return { leadTime, leadClock, q1, q2, q3, q4 };
+function parseMeters(token) {
+  const m = String(token || "").match(/^(\d+)m$/);
+  return m ? parseInt(m[1], 10) : "";
 }
 
-function extractFirst50(block){
+function extractFirst50(block) {
   const decimalTokens = [];
 
-  for(let i=3;i<Math.min(block.length, 18);i++){
+  for (let i = 3; i < Math.min(block.length, 18); i++) {
     const t = (block[i] || "").trim();
-    if(/^\d{2}\.\d{2}$/.test(t)){
+    if (/^\d{2}\.\d{2}$/.test(t)) {
       decimalTokens.push(parseFloat(t));
     }
   }
@@ -477,113 +382,123 @@ function extractFirst50(block){
   return decimalTokens[1] ?? "";
 }
 
-function parseMeters(token){
+function findDriver(block, horse) {
+  for (let i = 0; i < block.length; i++) {
+    const t = String(block[i] || "").trim();
 
-  if(!token) return "";
+    if (!t || t === horse) continue;
+    if (t.includes("Tabcorp") || t.includes("Race") || t.includes("Professional")) continue;
 
-  const m=token.match(/^(\d+)m$/);
-  return m ? parseInt(m[1]) : "";
-}
-
-function findDriver(block, horse){
-
-  for(let i=3;i<block.length;i++){
-
-    const t=block[i].trim();
-
-    if(t===horse) continue;
-
-    if(t.includes("Tabcorp")) continue;
-    if(t.includes("Race")) continue;
-    if(t.includes("Professional")) continue;
-
-    if(/^[A-Z][a-z]+(?:\s[A-Za-z.'-]+)+$/.test(t)){
+    if (/^[A-Z][a-z]+(?:\s+[A-Za-z.'-]+)+$/.test(t)) {
       return t;
     }
   }
-
   return "";
 }
 
-function findMeterRow(block){
+function extractPdfOfficialMeta(tokens, firstHorseStartIndex) {
+  const headerTokens = tokens.slice(0, Math.max(0, firstHorseStartIndex));
+  const joined = headerTokens.join(" ");
 
-  let meters=[];
+  const leadMatch = joined.match(/Lead\s+Time\s+(\d+:\d{2}\.\d+)/i);
+  const q1Match = joined.match(/1st\s+Quarter\s+(\d+:\d{2}\.\d+)/i);
+  const q2Match = joined.match(/2nd\s+Quarter\s+(\d+:\d{2}\.\d+)/i);
+  const q3Match = joined.match(/3rd\s+Quarter\s+(\d+:\d{2}\.\d+)/i);
+  const q4Match = joined.match(/4th\s+Quarter\s+(\d+:\d{2}\.\d+)/i);
 
-  for(let i=0;i<block.length;i++){
-    const m=parseMeters(block[i]);
-    if(m!==""){
-      meters.push(m);
-    }
-  }
-
-  if(meters.length>=9){
-    return meters.slice(-9);
-  }
-
-  return [];
-}
-
-function extractWinnerTimes(block){
-  const qLabelIndex = block.findIndex(t => /^Q[1-4]$/.test(t));
-  const endIndex = qLabelIndex === -1 ? block.length : qLabelIndex;
-
-  const plainTimes = [];
-  for(let i=15; i<endIndex; i++){
-    const t = block[i];
-    if(/^\d+:\d+\.\d+$/.test(t)){
-      plainTimes.push(t);
-    }
-  }
-
-  return {
-    mileRate: plainTimes[2] || "",
-    grossTime: plainTimes[plainTimes.length - 1] || ""
+  pdfOfficialMeta = {
+    leadTime: leadMatch ? normalizeRaceClock(leadMatch[1]) : "",
+    q1: q1Match ? normalizeRaceClock(q1Match[1]) : "",
+    q2: q2Match ? normalizeRaceClock(q2Match[1]) : "",
+    q3: q3Match ? normalizeRaceClock(q3Match[1]) : "",
+    q4: q4Match ? normalizeRaceClock(q4Match[1]) : ""
   };
 }
 
-function markLeaders(horses){
-  const validFirst50s = horses
-    .map(h => Number(h.first50))
-    .filter(v => !isNaN(v) && v > 0);
+function extractHorseData(block) {
+  const horse = block[2] || "";
+  const driver = findDriver(block, horse);
 
-  if(!validFirst50s.length){
+  const bracketTimes = block
+    .filter(isBracketQuarter)
+    .map(t => parseTimeToSeconds(t));
+
+  const allMeters = block
+    .map(parseMeters)
+    .filter(v => v !== "");
+
+  const rowClocksRaw = block.filter(t => isPlainClock(t) || isRankedClock(t));
+  const rowClocks = rowClocksRaw.map(t =>
+    normalizeRaceClock(String(t).replace(/\s*\[\d+\]\s*$/, ""))
+  );
+
+  const leadTimeClock = rowClocks.find((t, idx) => {
+    const raw = rowClocksRaw[idx] || "";
+    return /\[\d+\]/.test(String(raw));
+  }) || "";
+
+  const mileRate = rowClocks[rowClocks.length - 2] || "";
+  const grossTime = rowClocks[rowClocks.length - 1] || "";
+
+  return {
+    driver,
+    q1: bracketTimes[0] ?? "",
+    q2: bracketTimes[1] ?? "",
+    q3: bracketTimes[2] ?? "",
+    q4: bracketTimes[3] ?? "",
+    first200: allMeters[0] ?? "",
+    firstHalf: allMeters[1] ?? "",
+    middleHalf: allMeters[2] ?? "",
+    lastHalf: allMeters[3] ?? "",
+    leadDist: allMeters[4] ?? "",
+    q1Dist: allMeters[5] ?? "",
+    q2Dist: allMeters[6] ?? "",
+    q3Dist: allMeters[7] ?? "",
+    q4Dist: allMeters[8] ?? "",
+    lastMile: allMeters[9] ?? "",
+    leadTimeClock,
+    mileRate,
+    grossTime
+  };
+}
+
+function markLeaders(horses) {
+  const validFirst50s = horses.map(h => Number(h.first50)).filter(v => !isNaN(v) && v > 0);
+
+  if (!validFirst50s.length) {
     horses.forEach(h => h.isLeader = false);
     return;
   }
 
   const minFirst50 = Math.min(...validFirst50s);
-
   horses.forEach(h => {
     h.isLeader = Number(h.first50) === minFirst50;
   });
 }
 
-function validateLeaderFirst50(first50, isLeader, raceType){
-  if(!isLeader) return "";
+function validateLeaderFirst50(first50, isLeader, raceType) {
+  if (!isLeader) return "";
 
   const value = Number(first50);
-  if(isNaN(value)) return false;
+  if (isNaN(value)) return false;
 
-  if(raceType === "stand"){
-    return value >= 5 && value <= 6;
-  }
-
-  return value >= 3.2 && value <= 4.5;
+  return raceType === "stand"
+    ? (value >= 5 && value <= 6)
+    : (value >= 3.2 && value <= 4.5);
 }
 
-function parse(tokens){
+function parse(tokens) {
+  const starts = [];
 
-  const starts=[];
-
-  for(let i=0;i<tokens.length;i++){
-    if(isHorseStart(tokens,i)){
+  for (let i = 0; i < tokens.length; i++) {
+    if (isHorseStart(tokens, i)) {
       starts.push(i);
     }
   }
 
-  let fullText = tokens.join(" ");
-
+  const fullText = tokens.join(" ");
   const raceMatch = fullText.match(/Race\s+(\d+):\s+(.+?)\s+-\s+\d{3,4}m/i);
+
   latestRaceMeta = {
     raceNumber: raceMatch ? raceMatch[1] : "",
     raceTitle: raceMatch ? raceMatch[2].trim() : ""
@@ -595,56 +510,39 @@ function parse(tokens){
     grossTime: ""
   };
 
-  const horses=[];
+  extractPdfOfficialMeta(tokens, starts[0] ?? tokens.length);
 
-  for(let s=0;s<starts.length;s++){
+  const horses = [];
 
-    const start=starts[s];
-    const end=(s<starts.length-1)?starts[s+1]:tokens.length;
+  for (let s = 0; s < starts.length; s++) {
+    const start = starts[s];
+    const end = (s < starts.length - 1) ? starts[s + 1] : tokens.length;
 
-    let block=tokens.slice(start,end);
+    let block = tokens.slice(start, end);
 
-    const stopWords=["Scratched:","Tabcorp","Race","Data","Note:","[","-:--.--","N/A"];
+    const stopWords = ["Scratched:", "Tabcorp", "Race", "Data", "Note:", "[", "-:--.--", "N/A"];
+    let clean = [];
 
-    let clean=[];
-
-    for(let i=0;i<block.length;i++){
-      if(stopWords.includes(block[i])) break;
+    for (let i = 0; i < block.length; i++) {
+      if (stopWords.includes(block[i])) break;
       clean.push(block[i]);
     }
 
-    block=clean;
+    block = clean;
 
-    const rank=parseInt(block[0]);
-    const tab=parseInt(block[1]);
-    const horse=block[2]||"";
-    const topSpeed=parseFloat(block[3])||"";
-    const first50=extractFirst50(block);
+    const rank = parseInt(block[0], 10);
+    const tab = parseInt(block[1], 10);
+    const horse = block[2] || "";
+    const topSpeed = parseFloat(block[3]) || "";
+    const first50 = extractFirst50(block);
 
-    const raceTimes = extractRaceTimes(block);
-    const leadTime = raceTimes.leadTime;
-    const leadClock = raceTimes.leadClock;
-    const q1=raceTimes.q1;
-    const q2=raceTimes.q2;
-    const q3=raceTimes.q3;
-    const q4=raceTimes.q4;
+    const parsed = extractHorseData(block);
 
-    const driver=findDriver(block,horse);
-
-    const meters=findMeterRow(block);
-
-    const first200=meters[0]??"";
-    const firstHalf=meters[1]??"";
-    const middleHalf=meters[2]??"";
-    const lastHalf=meters[3]??"";
-    const lastMile=meters[8]??"";
-
-    if(rank === 1){
-      const winnerTimes = extractWinnerTimes(block);
+    if (rank === 1) {
       latestWinnerMeta = {
         horse,
-        mileRate: winnerTimes.mileRate,
-        grossTime: winnerTimes.grossTime
+        mileRate: parsed.mileRate,
+        grossTime: parsed.grossTime
       };
     }
 
@@ -652,21 +550,26 @@ function parse(tokens){
       rank,
       tab,
       horse,
-      driver,
+      driver: parsed.driver,
       topSpeed,
       first50,
-      first200,
-      firstHalf,
-      middleHalf,
-      lastHalf,
-      lastMile,
-      q1,
-      q2,
-      q3,
-      q4,
-      leadTime,
-      leadClock,
-      isLeader:false
+      first200: parsed.first200,
+      firstHalf: parsed.firstHalf,
+      middleHalf: parsed.middleHalf,
+      lastHalf: parsed.lastHalf,
+      leadDist: parsed.leadDist,
+      q1Dist: parsed.q1Dist,
+      q2Dist: parsed.q2Dist,
+      q3Dist: parsed.q3Dist,
+      q4Dist: parsed.q4Dist,
+      lastMile: parsed.lastMile,
+      q1: parsed.q1,
+      q2: parsed.q2,
+      q3: parsed.q3,
+      q4: parsed.q4,
+      leadTime: parsed.leadTimeClock ? parseTimeToSeconds(parsed.leadTimeClock) : "",
+      leadClock: parsed.leadTimeClock,
+      isLeader: false
     });
   }
 
@@ -676,6 +579,7 @@ function parse(tokens){
   websiteMeta = {
     raceType: "",
     source: "",
+    leadTime: "",
     mileRate: "",
     grossTime: ""
   };
@@ -684,296 +588,216 @@ function parse(tokens){
   display(horses);
 
   let msg = "PDF loaded";
-  if(latestRaceMeta.raceNumber){
-    msg += " | Race " + latestRaceMeta.raceNumber;
-  }
-  if(latestRaceMeta.raceTitle){
-    msg += " | " + latestRaceMeta.raceTitle;
-  }
+  if (latestRaceMeta.raceNumber) msg += " | Race " + latestRaceMeta.raceNumber;
+  if (latestRaceMeta.raceTitle) msg += " | " + latestRaceMeta.raceTitle;
+  if (pdfOfficialMeta.leadTime) msg += " | PDF Official Lead Time " + pdfOfficialMeta.leadTime;
   msg += " | Website data reset for this PDF";
   setStatus(msg);
 }
 
-async function fetchWebsiteContent(url){
-  const attempts = [];
-
-  attempts.push(url);
-
+async function fetchWebsiteContent(url) {
+  const attempts = [url];
   const mcMatch = url.match(/[?&]mc=([^&]+)/i);
-  if(mcMatch){
+
+  if (mcMatch) {
     attempts.push("https://legacy.harness.org.au/fields.cfm?mc=" + mcMatch[1]);
+    attempts.push("https://legacy.harness.org.au/fieldsprt.cfm?mc=" + mcMatch[1]);
   }
 
   const uniqueAttempts = [...new Set(attempts)];
 
-  for(const attemptUrl of uniqueAttempts){
-    try{
+  for (const attemptUrl of uniqueAttempts) {
+    try {
       const res = await fetch(attemptUrl);
       const txt = await res.text();
-      if(txt && txt.length > 500){
-        return txt;
-      }
-    }catch(err){}
+      if (txt && txt.length > 500) return txt;
+    } catch (err) {}
 
-    try{
+    try {
       const proxyUrl = "https://api.allorigins.win/raw?url=" + encodeURIComponent(attemptUrl);
       const res = await fetch(proxyUrl);
       const txt = await res.text();
-      if(txt && txt.length > 500){
-        return txt;
-      }
-    }catch(err){}
+      if (txt && txt.length > 500) return txt;
+    } catch (err) {}
   }
 
   throw new Error("Website fetch failed");
 }
 
-function getRelevantRaceBlock(root){
-  const blocks = Array.from(root.querySelectorAll("div.forPrint"));
-
-  if(!blocks.length){
-    return root;
-  }
-
-  if(!latestRaceMeta.raceNumber){
-    return blocks[0];
-  }
-
-  for(const block of blocks){
-    const raceNumberCell = block.querySelector("table.raceMoreInfo td.raceNumber");
-    if(raceNumberCell){
-      const blockRaceNumber = raceNumberCell.textContent.trim();
-      if(blockRaceNumber === String(latestRaceMeta.raceNumber).trim()){
-        return block;
-      }
-    }
-
-    const blockText = block.innerText || "";
-    if(new RegExp("\\bRace\\s*" + latestRaceMeta.raceNumber + "\\b","i").test(blockText)){
-      return block;
-    }
-  }
-
-  return blocks[0];
+function findWebsiteHorse(pdfHorse) {
+  const target = normalizeHorseName(pdfHorse);
+  return websiteRows.find(w => normalizeHorseName(w.horse) === target) || null;
 }
 
-function parseWebsiteHtml(html){
+function getDirectText(el) {
+  if (!el) return "";
+  return Array.from(el.childNodes)
+    .filter(node => node.nodeType === Node.TEXT_NODE)
+    .map(node => node.textContent)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(html, "text/html");
+function getRaceBlocksFromHtml(doc) {
+  return Array.from(doc.querySelectorAll("div.forPrint"));
+}
 
-  let rows = [];
+function findRaceBlockByRaceNumber(doc, raceNumber) {
+  const blocks = getRaceBlocksFromHtml(doc);
+  const target = String(raceNumber || "").trim();
 
-  const raceBlock = getRelevantRaceBlock(doc);
-  const raceInfoText = raceBlock ? raceBlock.innerText : (doc.body ? doc.body.innerText : html);
+  for (const block of blocks) {
+    const numCell = block.querySelector("td.raceNumber");
+    if (!numCell) continue;
 
-  if(/\bstand(?:ing)?\b/i.test(raceInfoText)){
-    websiteMeta.raceType = "stand";
-    document.getElementById("raceType").value = "stand";
-  }else if(/\bmobile\b/i.test(raceInfoText)){
-    websiteMeta.raceType = "mobile";
-    document.getElementById("raceType").value = "mobile";
+    const num = (numCell.textContent || "").replace(/\s+/g, " ").trim();
+    if (num === target) return block;
   }
 
-  const grossMatch = raceInfoText.match(/Gross Time:\s*([0-9:.]+)/i);
-  const mileMatch = raceInfoText.match(/Mile Rate:\s*([0-9:.]+)/i);
+  return null;
+}
 
-  websiteMeta.grossTime = grossMatch ? normalizeRaceClock(grossMatch[1]) : "";
-  websiteMeta.mileRate = mileMatch ? normalizeRaceClock(mileMatch[1]) : "";
+function extractWebsiteRaceTypeFromBlock(block) {
+  const info = block.querySelector("td.raceInformation");
+  const text = info ? info.textContent.replace(/\s+/g, " ").trim() : "";
 
-  const raceTables = Array.from(raceBlock.querySelectorAll("table.raceFieldTable.resultTable"));
+  if (/stand/i.test(text)) return "stand";
+  if (/mobile/i.test(text)) return "mobile";
+  return "";
+}
 
-  raceTables.forEach(table => {
-    const trList = Array.from(table.querySelectorAll("tr"));
+function extractWebsiteRaceTimesFromBlock(block) {
+  const out = {
+    leadTime: "",
+    mileRate: "",
+    grossTime: ""
+  };
 
-    trList.forEach(tr => {
-      const horseCell = tr.querySelector("td.horse_name");
-      const driverCell = tr.querySelector("td.driver");
+  const table = block.querySelector("table.raceTimes");
+  if (!table) return out;
 
-      if(!horseCell || !driverCell) return;
+  const tds = Array.from(table.querySelectorAll("td"));
 
-      const horseLink = horseCell.querySelector("a");
-      const horse = horseLink ? horseLink.textContent.trim() : horseCell.textContent.trim();
+  for (const td of tds) {
+    const strong = td.querySelector("strong");
+    if (!strong) continue;
 
-      const driverLink = driverCell.querySelector("a");
-      const driver = driverLink ? driverLink.textContent.trim() : driverCell.textContent.trim();
+    const label = strong.textContent.replace(/\s+/g, " ").trim().toLowerCase();
+    const raw = getDirectText(td);
 
-      const allTds = tr.querySelectorAll("td");
-      let tab = "";
+    if (label.includes("lead time")) out.leadTime = raw;
+    else if (label.includes("mile rate")) out.mileRate = raw;
+    else if (label.includes("gross time")) out.grossTime = raw;
+  }
 
-      if(allTds.length >= 6){
-        tab = allTds[5].textContent.trim();
-      }
+  return out;
+}
 
-      if(horse){
-        rows.push({
-          tab,
-          horse,
-          driver
-        });
-      }
+function extractWebsiteRowsFromBlock(block) {
+  const rows = [];
+  const table = block.querySelector("table.raceFieldTable.resultTable");
+  if (!table) return rows;
+
+  const trList = Array.from(table.querySelectorAll("tr"));
+
+  for (const tr of trList) {
+    const cells = Array.from(tr.querySelectorAll("td"));
+    if (!cells.length) continue;
+
+    const firstCellText = (cells[0].textContent || "").replace(/\s+/g, " ").trim();
+    if (!/^\d+$/.test(firstCellText)) continue;
+
+    const horseNumberCells = Array.from(tr.querySelectorAll("td.horse_number"));
+    const horseAnchor = tr.querySelector("td.horse_name a.horse_name_link");
+    const driverAnchor = tr.querySelector("td.driver a");
+
+    if (horseNumberCells.length < 2) continue;
+    if (!horseAnchor || !driverAnchor) continue;
+
+    const placing = (horseNumberCells[0].textContent || "").replace(/\s+/g, " ").trim();
+    const tab = (horseNumberCells[1].textContent || "").replace(/\s+/g, " ").trim();
+    const horse = (horseAnchor.textContent || "").replace(/\s+/g, " ").trim();
+    const driver = (driverAnchor.textContent || "").replace(/\s+/g, " ").trim();
+
+    rows.push({
+      rank: placing,
+      tab,
+      horse,
+      driver
     });
-  });
+  }
 
   return rows;
 }
 
-function getTextFromSource(source){
-  const text = String(source || "");
-
-  if(/<html|<table|<tr|<td|<body|class=/i.test(text)){
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(text, "text/html");
-    return doc.body ? doc.body.innerText.replace(/\r/g, "") : text.replace(/\r/g, "");
+function parseWebsiteSource(source, sourceType) {
+  const raw = String(source || "").trim();
+  if (!raw) {
+    setStatus("Paste website HTML or copied page text first.");
+    return;
   }
 
-  return text.replace(/\r/g, "");
-}
+  websiteRows = [];
+  websiteMeta = {
+    raceType: "",
+    source: sourceType,
+    leadTime: "",
+    mileRate: "",
+    grossTime: ""
+  };
 
-function sliceToRelevantRace(lines){
-  if(!latestRaceMeta.raceNumber){
-    return lines;
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(raw, "text/html");
+
+  const raceBlock = findRaceBlockByRaceNumber(doc, latestRaceMeta.raceNumber);
+
+  if (!raceBlock) {
+    setStatus("Could not find matching race block for Race " + (latestRaceMeta.raceNumber || "?") + " in pasted Harness HTML.");
+    if (latestHorses.length) display(latestHorses);
+    return;
   }
 
-  const raceStartRegex = new RegExp("\\bRace\\s*" + latestRaceMeta.raceNumber + "\\b", "i");
-  const startIndex = lines.findIndex(line => raceStartRegex.test(line));
-
-  if(startIndex === -1){
-    return lines;
+  websiteMeta.raceType = extractWebsiteRaceTypeFromBlock(raceBlock);
+  if (websiteMeta.raceType) {
+    document.getElementById("raceType").value = websiteMeta.raceType;
   }
 
-  let endIndex = lines.length;
+  const raceTimes = extractWebsiteRaceTimesFromBlock(raceBlock);
+  websiteMeta.leadTime = raceTimes.leadTime;
+  websiteMeta.mileRate = raceTimes.mileRate;
+  websiteMeta.grossTime = raceTimes.grossTime;
 
-  for(let i=startIndex+1;i<lines.length;i++){
-    if(/\bRace\s+\d+\b/i.test(lines[i])){
-      endIndex = i;
-      break;
-    }
-  }
+  websiteRows = extractWebsiteRowsFromBlock(raceBlock);
 
-  return lines.slice(startIndex, endIndex);
-}
-
-function dedupeWebsiteRows(rows){
-  const deduped = [];
-  const seen = new Set();
-
-  rows.forEach(r => {
-    const key = normalizeHorseName(r.horse);
-    if(!key) return;
-    if(seen.has(key)) return;
-    seen.add(key);
-    deduped.push(r);
-  });
-
-  return deduped;
-}
-
-function parseWebsiteSource(source, sourceType){
-
-  const raw = String(source || "");
-  websiteMeta.source = sourceType;
-  websiteMeta.grossTime = "";
-  websiteMeta.mileRate = "";
-
-  let rows = [];
-
-  if(/<table|class=|raceFieldTable|driver-short|horse_name_link|forPrint/i.test(raw)){
-    rows = parseWebsiteHtml(raw);
-  }
-
-  if(!rows.length){
-    const normalizedText = getTextFromSource(raw);
-
-    if(/\bstand(?:ing)?\b/i.test(normalizedText)){
-      websiteMeta.raceType = "stand";
-      document.getElementById("raceType").value = "stand";
-    }else if(/\bmobile\b/i.test(normalizedText)){
-      websiteMeta.raceType = "mobile";
-      document.getElementById("raceType").value = "mobile";
-    }
-
-    const workingTextLines = sliceToRelevantRace(
-      normalizedText
-        .split("\n")
-        .map(s => s.replace(/\s+/g," ").trim())
-        .filter(Boolean)
-    );
-
-    const workingText = workingTextLines.join("\n");
-
-    const grossMatch = workingText.match(/Gross Time:\s*([0-9:.]+)/i);
-    const mileMatch = workingText.match(/Mile Rate:\s*([0-9:.]+)/i);
-
-    websiteMeta.grossTime = grossMatch ? normalizeRaceClock(grossMatch[1]) : "";
-    websiteMeta.mileRate = mileMatch ? normalizeRaceClock(mileMatch[1]) : "";
-
-    const fallbackRows = [];
-
-    latestHorses.forEach(pdfHorse => {
-      const targetHorse = normalizeHorseName(pdfHorse.horse);
-
-      for(let i=0;i<workingTextLines.length;i++){
-
-        const lineNorm = normalizeHorseName(workingTextLines[i]);
-        if(!lineNorm.includes(targetHorse)) continue;
-
-        const rawLine = workingTextLines[i];
-        const tabMatch = rawLine.match(/^(\d{1,2})\b/);
-
-        let driver = "";
-
-        if(!driver && workingTextLines[i+1] && /^[A-Z][a-z]+(?:\s+[A-Za-z.'-]+)+$/.test(workingTextLines[i+1])){
-          driver = workingTextLines[i+1].trim();
-        }
-
-        fallbackRows.push({
-          tab: tabMatch ? tabMatch[1].trim() : "",
-          horse: pdfHorse.horse,
-          driver
-        });
-
-        break;
-      }
-    });
-
-    rows = fallbackRows;
-  }
-
-  websiteRows = dedupeWebsiteRows(rows);
-
-  if(latestHorses.length){
+  if (latestHorses.length) {
     display(latestHorses);
   }
 
   setStatus(
     "Website parsed: " + websiteRows.length + " runner(s) found" +
     (websiteMeta.raceType ? " | Race type auto-set to " + websiteMeta.raceType : "") +
-    (websiteMeta.grossTime ? " | Gross Time " + websiteMeta.grossTime : "") +
-    (websiteMeta.mileRate ? " | Mile Rate " + websiteMeta.mileRate : "")
+    (websiteMeta.leadTime ? " | Lead Time " + websiteMeta.leadTime : "") +
+    (websiteMeta.mileRate ? " | Mile Rate " + websiteMeta.mileRate : "") +
+    (websiteMeta.grossTime ? " | Gross Time " + websiteMeta.grossTime : "")
   );
 }
 
-function findWebsiteHorse(pdfHorse){
-  const target = normalizeHorseName(pdfHorse);
-  return websiteRows.find(w => normalizeHorseName(w.horse) === target) || null;
-}
-
-function renderWinnerSummary(){
+function renderWinnerSummary() {
   const winnerDiv = document.getElementById("winnerSummary");
 
-  const pdfGross = latestWinnerMeta.grossTime || "";
-  const pdfMile = latestWinnerMeta.mileRate || "";
-  const webGross = websiteMeta.grossTime || "";
-  const webMile = websiteMeta.mileRate || "";
-
-  const grossClass = getWinnerTimeCellClass(pdfGross, webGross);
-  const mileClass = getWinnerTimeCellClass(pdfMile, webMile);
-
-  if(!latestWinnerMeta.horse){
+  if (!latestWinnerMeta.horse) {
     winnerDiv.innerHTML = "";
     return;
   }
+
+  const pdfLeadTime = pdfOfficialMeta.leadTime || "";
+  const pdfMile = latestWinnerMeta.mileRate || "";
+  const pdfGross = latestWinnerMeta.grossTime || "";
+
+  const webLead = websiteMeta.leadTime || "";
+  const webMile = websiteMeta.mileRate || "";
+  const webGross = websiteMeta.grossTime || "";
 
   let html = "";
   html += "<table class='summary-table'>";
@@ -983,73 +807,82 @@ function renderWinnerSummary(){
   html += "<th>Web Mile Rate</th>";
   html += "<th>PDF Gross Time</th>";
   html += "<th>Web Gross Time</th>";
+  html += "<th>PDF Lead Time</th>";
+  html += "<th>Web Lead Time</th>";
   html += "</tr>";
   html += "<tr>";
   html += `<td>${latestWinnerMeta.horse}</td>`;
-  html += `<td class="${pdfMile ? 'valid' : 'match-empty'}">${pdfMile || "-"}</td>`;
-  html += `<td class="${mileClass}">${webMile || "-"}</td>`;
-  html += `<td class="${pdfGross ? 'valid' : 'match-empty'}">${pdfGross || "-"}</td>`;
-  html += `<td class="${grossClass}">${webGross || "-"}</td>`;
+  html += `<td class="${pdfMile ? "valid" : "match-empty"}">${pdfMile || "-"}</td>`;
+  html += `<td class="${webMile ? "match-pass" : "match-empty"}">${webMile || "-"}</td>`;
+  html += `<td class="${pdfGross ? "valid" : "match-empty"}">${pdfGross || "-"}</td>`;
+  html += `<td class="${webGross ? "match-pass" : "match-empty"}">${webGross || "-"}</td>`;
+  html += `<td class="${pdfLeadTime ? "valid" : "match-empty"}">${pdfLeadTime || "-"}</td>`;
+  html += `<td class="${webLead ? "match-pass" : "match-empty"}">${webLead || "-"}</td>`;
   html += "</tr>";
   html += "</table>";
 
   winnerDiv.innerHTML = html;
 }
 
-function display(horses){
-
+function display(horses) {
   const raceType = document.getElementById("raceType").value;
 
   renderWinnerSummary();
 
-  let html="<table>";
+  let html = "<table>";
 
-  html+="<tr>";
-  html+="<th>Rank</th>";
-  html+="<th>Horse</th>";
-  html+="<th>Driver</th>";
-  html+="<th>Web Horse</th>";
-  html+="<th>Web Driver</th>";
-  html+="<th>Speed</th>";
-  html+="<th>1st 50m</th>";
-  html+="<th>Leader 50m Rule</th>";
-  html+="<th>Mile</th>";
-  html+="<th>200m</th>";
-  html+="<th>1st Half</th>";
-  html+="<th>Mid Half</th>";
-  html+="<th>Last Half</th>";
-  html+="<th>Lead Time</th>";
-  html+="<th>Q1</th>";
-  html+="<th>Q2</th>";
-  html+="<th>Q3</th>";
-  html+="<th>Q4</th>";
-  html+="</tr>";
+  html += "<tr>";
+  html += "<th>Rank</th>";
+  html += "<th>Web Rank</th>";
+  html += "<th>Horse</th>";
+  html += "<th>Web Horse</th>";
+  html += "<th>TAB</th>";
+  html += "<th>Web TAB</th>";
+  html += "<th>Driver</th>";
+  html += "<th>Web Driver</th>";
+  html += "<th>Speed</th>";
+  html += "<th>1st 50m</th>";
+  html += "<th>Leader 50m Rule</th>";
+  html += "<th>Mile</th>";
+  html += "<th>200m</th>";
+  html += "<th>1st Half</th>";
+  html += "<th>Mid Half</th>";
+  html += "<th>Last Half</th>";
+  html += "<th>Lead Time</th>";
+  html += "<th>Q1</th>";
+  html += "<th>Q2</th>";
+  html += "<th>Q3</th>";
+  html += "<th>Q4</th>";
+  html += "</tr>";
 
-  horses.forEach(h=>{
-
+  horses.forEach(h => {
     const webHorse = findWebsiteHorse(h.horse);
-
+    const webRank = webHorse ? webHorse.rank : "";
+    const webTab = webHorse ? webHorse.tab : "";
     const webHorseName = webHorse ? webHorse.horse : "";
     const webDriverName = webHorse ? webHorse.driver : "";
 
+    const webRankClass = !webRank ? "match-empty" : (String(h.rank) === String(webRank) ? "match-pass" : "match-fail");
+    const webTabClass = !webTab ? "match-empty" : (String(h.tab) === String(webTab) ? "match-pass" : "match-fail");
     const webHorseClass = getHorseCellClass(h.horse, webHorseName);
     const webDriverClass = getDriverCellClass(h.driver, webDriverName);
 
-    const speedClass=h.topSpeed<61.5?"valid":"invalid";
-    const mileClass=h.lastMile>1609?"valid":"invalid";
-    const d200Class=(h.first200>=195&&h.first200<=205)?"valid":"invalid";
+    const speedClass = h.topSpeed < 61.5 ? "valid" : "invalid";
+    const mileClass = h.lastMile > 1609 ? "valid" : "invalid";
+    const d200Class = (h.first200 >= 195 && h.first200 <= 205) ? "valid" : "invalid";
 
-    const fhClass=h.firstHalf>804?"valid":"invalid";
-    const mhClass=h.middleHalf>804?"valid":"invalid";
-    const lhClass=h.lastHalf>804?"valid":"invalid";
+    const fhClass = h.firstHalf > 804 ? "valid" : "invalid";
+    const mhClass = h.middleHalf > 804 ? "valid" : "invalid";
+    const lhClass = h.lastHalf > 804 ? "valid" : "invalid";
 
-    const q1Class=h.q1>25.5?"valid":"invalid";
-    const q2Class=h.q2>25.5?"valid":"invalid";
-    const q3Class=h.q3>25.5?"valid":"invalid";
-    const q4Class=h.q4>25.5?"valid":"invalid";
-    const leadClass = h.leadTime===""
+    const q1Class = h.q1 > 25.5 ? "valid" : "invalid";
+    const q2Class = h.q2 > 25.5 ? "valid" : "invalid";
+    const q3Class = h.q3 > 25.5 ? "valid" : "invalid";
+    const q4Class = h.q4 > 25.5 ? "valid" : "invalid";
+
+    const leadClass = h.leadTime === ""
       ? "match-empty"
-      : (h.leadTime<=70 ? "valid" : "invalid");
+      : (h.leadTime <= 70 ? "valid" : "invalid");
 
     const first50Valid = validateLeaderFirst50(h.first50, h.isLeader, raceType);
     const first50RuleClass = h.isLeader
@@ -1058,34 +891,34 @@ function display(horses){
 
     const first50CellClass = h.isLeader ? "leader" : "";
 
-    html+="<tr>";
-    html+=`<td>${h.rank}</td>`;
-    html+=`<td>${h.horse}</td>`;
-    html+=`<td>${h.driver}</td>`;
-    html+=`<td class="${webHorseClass}">${webHorseName || "-"}</td>`;
-    html+=`<td class="${webDriverClass}">${webDriverName || "-"}</td>`;
-    html+=`<td class="${speedClass}">${h.topSpeed}</td>`;
-    html+=`<td class="${first50CellClass}">${h.first50}</td>`;
-    html+=`<td class="${first50RuleClass}">${h.isLeader ? (first50Valid ? "PASS" : "FAIL") : "-"}</td>`;
-    html+=`<td class="${mileClass}">${h.lastMile}</td>`;
-    html+=`<td class="${d200Class}">${h.first200}</td>`;
-    html+=`<td class="${fhClass}">${h.firstHalf}</td>`;
-    html+=`<td class="${mhClass}">${h.middleHalf}</td>`;
-    html+=`<td class="${lhClass}">${h.lastHalf}</td>`;
-    html+=`<td class="${leadClass}">${h.leadClock || "-"}</td>`;
-    html+=`<td class="${q1Class}">${h.q1}</td>`;
-    html+=`<td class="${q2Class}">${h.q2}</td>`;
-    html+=`<td class="${q3Class}">${h.q3}</td>`;
-    html+=`<td class="${q4Class}">${h.q4}</td>`;
-    html+="</tr>";
-
+    html += "<tr>";
+    html += `<td>${h.rank}</td>`;
+    html += `<td class="${webRankClass}">${webRank || "-"}</td>`;
+    html += `<td>${h.horse}</td>`;
+    html += `<td class="${webHorseClass}">${webHorseName || "-"}</td>`;
+    html += `<td>${h.tab}</td>`;
+    html += `<td class="${webTabClass}">${webTab || "-"}</td>`;
+    html += `<td>${h.driver}</td>`;
+    html += `<td class="${webDriverClass}">${webDriverName || "-"}</td>`;
+    html += `<td class="${speedClass}">${h.topSpeed}</td>`;
+    html += `<td class="${first50CellClass}">${h.first50}</td>`;
+    html += `<td class="${first50RuleClass}">${h.isLeader ? (first50Valid ? "PASS" : "FAIL") : "-"}</td>`;
+    html += `<td class="${mileClass}">${h.lastMile}</td>`;
+    html += `<td class="${d200Class}">${h.first200}</td>`;
+    html += `<td class="${fhClass}">${h.firstHalf}</td>`;
+    html += `<td class="${mhClass}">${h.middleHalf}</td>`;
+    html += `<td class="${lhClass}">${h.lastHalf}</td>`;
+    html += `<td class="${leadClass}">${h.leadClock || "-"}</td>`;
+    html += `<td class="${q1Class}">${h.q1}</td>`;
+    html += `<td class="${q2Class}">${h.q2}</td>`;
+    html += `<td class="${q3Class}">${h.q3}</td>`;
+    html += `<td class="${q4Class}">${h.q4}</td>`;
+    html += "</tr>";
   });
 
-  html+="</table>";
-
-  document.getElementById("result").innerHTML=html;
+  html += "</table>";
+  document.getElementById("result").innerHTML = html;
 }
-
 </script>
 
 </body>
