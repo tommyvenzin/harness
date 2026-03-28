@@ -377,13 +377,72 @@ function parseTimeToSeconds(token){
   let cleaned = token.replace(/\[\d+\]/g,"").trim();
   cleaned = cleaned.replace(/^\(/,"").replace(/\)$/,"");
 
-  const match = cleaned.match(/^(\d+):(\d+(?:\.\d+)?)$/);
+  const match = cleaned.match(/^(\d+):(\d{2}(?:\.\d+)?)$/);
   if(!match) return "";
 
   const minutes=parseInt(match[1]);
   const seconds=parseFloat(match[2]);
 
   return +(minutes*60+seconds).toFixed(2);
+}
+
+function parseRaceClockToken(token){
+  if(!token) return "";
+
+  const cleaned = token
+    .replace(/\[\d+\]/g, "")
+    .replace(/[(),]/g, "")
+    .trim();
+
+  if(!/^\d+:\d{2}\.\d+$/.test(cleaned)) return "";
+  return parseTimeToSeconds(cleaned);
+}
+
+function extractRaceTimes(block){
+  const inlineTimes = [];
+  const bracketTimes = [];
+
+  for(let i=0;i<block.length;i++){
+    const token = (block[i] || "").trim();
+    if(!token) continue;
+
+    const parenthetical = token.match(/^\((\d+:\d{2}\.\d+)\)$/);
+    if(parenthetical){
+      const sec = parseTimeToSeconds(parenthetical[1]);
+      if(sec !== "") bracketTimes.push(sec);
+      continue;
+    }
+
+    const sec = parseRaceClockToken(token);
+    if(sec !== ""){
+      inlineTimes.push(sec);
+    }
+  }
+
+  const leadCandidates = inlineTimes.filter(v => v >= 45 && v <= 80);
+  const quarterCandidates = inlineTimes.filter(v => v >= 20 && v <= 40);
+
+  const leadTime = leadCandidates.length ? leadCandidates[0] : "";
+
+  const q1 = quarterCandidates[0] ?? "";
+  const q2 = bracketTimes[0] ?? quarterCandidates[1] ?? "";
+  const q3 = bracketTimes[1] ?? quarterCandidates[2] ?? "";
+  const q4 = bracketTimes[2] ?? quarterCandidates[3] ?? "";
+
+  return { leadTime, q1, q2, q3, q4 };
+}
+
+function extractFirst50(block){
+  const decimalTokens = [];
+
+  for(let i=3;i<Math.min(block.length, 18);i++){
+    const t = (block[i] || "").trim();
+    if(/^\d{2}\.\d{2}$/.test(t)){
+      decimalTokens.push(parseFloat(t));
+    }
+  }
+
+  return decimalTokens[1] ?? "";
 }
 
 function parseMeters(token){
@@ -528,15 +587,13 @@ function parse(tokens){
     const tab=parseInt(block[1]);
     const horse=block[2]||"";
     const topSpeed=parseFloat(block[3])||"";
-    const first50=parseFloat(block[5])||"";
+    const first50=extractFirst50(block);
 
-    const leadTime=block[11]||"";
-    const q1=parseTimeToSeconds(leadTime);
-
-    const splitTimes=block.filter(t => /^\(\d+:\d+\.\d+\)$/.test(t));
-    const q2=splitTimes[0] ? parseTimeToSeconds(splitTimes[0]) : "";
-    const q3=splitTimes[1] ? parseTimeToSeconds(splitTimes[1]) : "";
-    const q4=splitTimes[2] ? parseTimeToSeconds(splitTimes[2]) : "";
+    const raceTimes = extractRaceTimes(block);
+    const q1=raceTimes.q1;
+    const q2=raceTimes.q2;
+    const q3=raceTimes.q3;
+    const q4=raceTimes.q4;
 
     const driver=findDriver(block,horse);
 
